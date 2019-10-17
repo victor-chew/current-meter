@@ -24,14 +24,21 @@
 const byte INT_PIN = D6;
 const float INT_TO_COULUMB = 0.614439;
 
+SSD1306Wire screen(0x3c, SDA, SCL);
 bool blinker = false;
-unsigned long total_time = 0;
+unsigned long total_time = 0, total_interrupts = 0;
 char time_str[64] = "  00:00:00", current_str[64] = "  0.00mA";
 volatile bool trigger = false;
 volatile unsigned long num_interrupts = 0, time1 = 0, time2 = 0;
 
-SSD1306Wire screen(0x3c, SDA, SCL);
-
+void debug(const char *format, ...) {
+  char buf[256];
+  va_list ap;
+  va_start(ap, format);
+  vsnprintf(buf, sizeof(buf), format, ap);
+  va_end(ap);
+  Serial.println(buf);
+}
 void ICACHE_RAM_ATTR handleInterrupt() {
   if (time1 == 0) {
     time1 = millis();
@@ -67,15 +74,23 @@ void setup() {
 
 void loop() {
   if (trigger) {
+    cli();
     trigger = false;
-    total_time += time2 - time1;
+    unsigned long interval = time2 - time1;
+    unsigned long ni = num_interrupts;
     time1 = time2;
-    float ma_avg = total_time == 0 ? 0.0 : (num_interrupts * INT_TO_COULUMB) / total_time * 1000.0 * 1000.0;
+    num_interrupts = 0;
+    sei();
+    total_time += interval;
+    total_interrupts += ni; 
+    float ma = (ni * INT_TO_COULUMB) / (interval / 1000.0) * 1000.0;
+    float ma_avg = (total_interrupts * INT_TO_COULUMB) / (total_time / 1000.0) * 1000.0;
     int ss = total_time / 1000;
     int mm = ss / 60; ss -= mm * 60;
     int hh = mm / 60; mm -= hh * 60;
     sprintf(time_str, "  %02d:%02d:%02d", hh, mm ,ss);
     sprintf(current_str, "  %.2fmA", ma_avg);
+    debug("interval = %.3fs; num_interrupts = %lu; ma = %.3fmA; ma_avg = %.3fmA", interval/1000.0, ni, ma, ma_avg);
   }
   updateScreen();
   delay(1000);
